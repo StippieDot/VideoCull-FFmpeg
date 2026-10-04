@@ -1,0 +1,17 @@
+Only define the wcscpy_s/wcscat_s fallbacks for old MSVC.
+
+MinGW-w64 provides both functions. Without the defined() check, _MSC_VER < 1400 is
+true for gcc, and the macros break the declarations in newer MinGW-w64 headers
+(stralign.h).
+
+--- a/libvpl/src/windows/mfx_dispatcher_defs.h	2026-10-04 13:14:31.798135500 +0200
++++ b/libvpl/src/windows/mfx_dispatcher_defs.h	2026-10-04 13:14:32.032958700 +0200
+@@ -17,7 +17,7 @@
+ #define MAX_PLUGIN_PATH 4096
+ #define MAX_PLUGIN_NAME 4096
+ 
+-#if _MSC_VER < 1400
++#if defined(_MSC_VER) && _MSC_VER < 1400
+     #define wcscpy_s(to, to_size, from) \
+         (void)(to_size);                \
+         wcscpy(to, from)

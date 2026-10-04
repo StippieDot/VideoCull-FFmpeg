@@ -94,4 +94,23 @@ done_step ffmpeg
 cp "$INSTALL/bin/ffmpeg.exe" "$INSTALL/bin/ffprobe.exe" "$INSTALL"/bin/*.dll "$OUT/"
 strip --strip-unneeded "$OUT"/*.exe "$OUT"/*.dll
 cp "$d/COPYING.GPLv3" "$OUT/LICENSE.txt"
-ls -l "$OUT"
+
+# Licence texts of everything compiled into the binaries. The permissive licences among them
+# require their notice to travel with the binaries.
+L="$OUT/licenses"
+mkdir -p "$L"
+cp "$WORK/ffmpeg/LICENSE.md" "$L/ffmpeg.txt"
+cp "$WORK/dav1d/COPYING" "$L/dav1d.txt"
+cp "$WORK/x264/COPYING" "$L/x264.txt"
+cp "$WORK/zlib/LICENSE" "$L/zlib.txt"
+cp "$WORK/bzip2/LICENSE" "$L/bzip2.txt"
+cp "$WORK/libvpl/LICENSE" "$L/libvpl.txt"
+# Both header packages carry their MIT notice only in the header comments.
+sed -n '1,/^ \*\//p' "$WORK/nv-codec-headers/include/ffnvcodec/nvEncodeAPI.h" > "$L/nv-codec-headers.txt"
+sed -n '1,/^#ifndef/p' "$WORK/amf-headers/AMF/core/Factory.h" | sed '$d' > "$L/amf-headers.txt"
+for runtime in winpthreads crt; do
+  found="$(find "$MINGW_PREFIX/share/licenses" -maxdepth 2 -ipath "*$runtime*" -type f | head -n 1)"
+  [[ -n "$found" ]] || { echo "no licence file for $runtime in $MINGW_PREFIX/share/licenses" >&2; exit 1; }
+  cp "$found" "$L/mingw-w64-$runtime.txt"
+done
+ls -lR "$OUT"

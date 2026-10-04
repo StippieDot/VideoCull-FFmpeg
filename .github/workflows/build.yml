@@ -22,7 +22,7 @@ jobs:
         with:
           msystem: UCRT64
           update: false
-          install: make diffutils zip
+          install: make diffutils patch zip
 
       - name: Install locked toolchain
         run: bash scripts/install-toolchain.sh
@@ -82,7 +82,7 @@ jobs:
         with:
           msystem: UCRT64
           update: false
-          install: make diffutils
+          install: make diffutils patch
 
       - uses: actions/download-artifact@v8
         with:

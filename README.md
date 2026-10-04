@@ -25,6 +25,7 @@ imports nothing but Windows system DLLs.
 
 - [`sources.lock`](sources.lock): every source archive, with its SHA-256 and download URL.
 - [`msys2.lock`](msys2.lock): the exact MSYS2 compiler packages, with their SHA-256.
+- [`patches/`](patches): our fixes to upstream sources, applied when a source is unpacked.
 - [`scripts/build.sh`](scripts/build.sh): the whole build. It never downloads anything.
 
 ## Releases
