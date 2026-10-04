@@ -81,7 +81,8 @@ INSTALL="$WORK/ffmpeg-install"
   --enable-gpl --enable-version3 \
   --enable-shared --disable-static \
   --disable-autodetect \
-  --disable-debug --disable-doc --disable-ffplay --disable-avdevice --disable-network \
+  --disable-debug --disable-doc --disable-ffplay --disable-network \
+  --disable-indevs --enable-indev=lavfi --disable-outdevs \
   --enable-w32threads \
   --enable-zlib --enable-bzlib \
   --enable-d3d11va --enable-d3d12va --enable-dxva2 --enable-mediafoundation \

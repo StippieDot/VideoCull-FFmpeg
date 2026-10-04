@@ -16,7 +16,8 @@ Only what VideoCull needs is enabled, and nothing is detected automatically from
 - zlib and bzip2
 - hardware decoding through D3D11VA, D3D12VA, DXVA2, NVDEC/CUVID and Intel QSV (libvpl)
 - hardware encoding through NVENC, AMF, QSV and Media Foundation
-- no network protocols, no `ffplay`, no `libavdevice`
+- no network protocols, no `ffplay`, and no capture devices: `libavdevice` only provides the `lavfi`
+  test-signal input that VideoCull's tests use
 
 The gcc runtime is linked statically, so the runtime folder contains only FFmpeg's own files and
 imports nothing but Windows system DLLs.

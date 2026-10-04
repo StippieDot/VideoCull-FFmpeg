@@ -112,3 +112,41 @@ jobs:
           diff <(cd first && ls | grep -v README.txt) <(cd rebuild/recipe/out && ls)
           diff <(first/ffmpeg.exe -hide_banner -buildconf) <(rebuild/recipe/out/ffmpeg.exe -hide_banner -buildconf)
           echo "Same files and configuration. (Binaries are not expected to be byte-identical.)"
+
+  # Publishes only when started by hand on main, after both builds passed. The release is created as a
+  # draft, filled, then published, because immutable releases cannot be changed afterwards.
+  publish:
+    needs: [build, rebuild-from-source]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: toolchain
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          manifest="$(ls dist/*-manifest.json)"
+          name="$(basename "$manifest" -manifest.json)"   # videocull-ffmpeg-<version>-r<revision>
+          tag="ffmpeg-${name#videocull-ffmpeg-}"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "Release $tag already exists; raise REVISION for a new build." >&2
+            exit 1
+          fi
+          (cd dist && sha256sum --check SHA256SUMS)
+          cat > notes.md <<NOTES
+          FFmpeg $(jq -r .ffmpeg "$manifest") built for VideoCull, revision $(jq -r .revision "$manifest"), from commit $GITHUB_SHA.
+
+          - \`$name-win64.zip\`: the runtime folder VideoCull bundles
+          - \`$name-source.tar\`: the complete corresponding source (GitHub's automatic "Source code" archives contain only the build recipe)
+          - \`$name-manifest.json\`: versions, configure options and hashes of every input and output
+          - \`SHA256SUMS\`
+          NOTES
+          gh release create "$tag" --draft --target "$GITHUB_SHA" --title "FFmpeg $(jq -r .ffmpeg "$manifest") for VideoCull (r$(jq -r .revision "$manifest"))" --notes-file notes.md
+          gh release upload "$tag" dist/*
+          gh release edit "$tag" --draft=false
