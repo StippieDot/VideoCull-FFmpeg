@@ -110,7 +110,9 @@ jobs:
           mkdir first
           unzip -q dist/*-win64.zip -d first
           diff <(cd first && ls | grep -v README.txt) <(cd rebuild/recipe/out && ls)
-          diff <(first/ffmpeg.exe -hide_banner -buildconf) <(rebuild/recipe/out/ffmpeg.exe -hide_banner -buildconf)
+          # The two builds ran in different folders; compare the options without those paths.
+          buildconf() { "$1" -hide_banner -buildconf | sed -E 's#[^ =]*/work/#<work>/#g'; }
+          diff <(buildconf first/ffmpeg.exe) <(buildconf rebuild/recipe/out/ffmpeg.exe)
           echo "Same files and configuration. (Binaries are not expected to be byte-identical.)"
 
   # Publishes only when started by hand on main, after both builds passed. The release is created as a
