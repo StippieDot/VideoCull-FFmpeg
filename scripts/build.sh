@@ -19,6 +19,11 @@ mkdir -p "$PREFIX/include" "$PREFIX/lib/pkgconfig" "$OUT"
 export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 export PKG_CONFIG_PATH=""
 
+# The linker prefers libwinpthread.dll.a over libwinpthread.a in the same folder, which would make
+# the DLLs import libwinpthread-1.dll. Static copies in our prefix (searched first) avoid that.
+cp "$MINGW_PREFIX/lib/libwinpthread.a" "$PREFIX/lib/libwinpthread.a"
+cp "$MINGW_PREFIX/lib/libwinpthread.a" "$PREFIX/lib/libpthread.a"
+
 step() { echo "::group::$1"; SECONDS=0; }
 done_step() { echo "$1 took ${SECONDS}s"; echo "::endgroup::"; }
 
