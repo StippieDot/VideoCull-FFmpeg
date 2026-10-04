@@ -1,0 +1,114 @@
+name: Build
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: make diffutils zip
+
+      - name: Install locked toolchain
+        run: bash scripts/install-toolchain.sh
+
+      - name: Fetch and verify sources
+        run: bash scripts/fetch-sources.sh
+
+      - name: Build
+        run: time bash scripts/build.sh
+
+      - name: Check runtime DLL imports
+        run: bash scripts/check-runtime.sh out
+
+      - name: Install fixture encoders (test clips only, not shipped)
+        run: pacman -S --noconfirm --needed mingw-w64-ucrt-x86_64-ffmpeg
+
+      - name: Smoke test
+        run: bash scripts/smoke-test.sh out "$(cygpath -u "$MSYSTEM_PREFIX")/bin/ffmpeg.exe"
+
+      - name: Package
+        run: bash scripts/package.sh
+
+      - name: Report sizes
+        run: |
+          {
+            echo '### Runtime'
+            echo '```'
+            ls -l out
+            du -sh out
+            echo '```'
+            echo '### Release files'
+            echo '```'
+            ls -l dist
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: toolchain
+          path: |
+            dist/
+            msys2.lock
+          if-no-files-found: error
+          retention-days: 30
+
+  # Proves the source archive is complete: no checkout and no source downloads, only the archive
+  # plus the locked compiler packages.
+  rebuild-from-source:
+    needs: build
+    runs-on: windows-2025
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: make diffutils
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: toolchain
+
+      - name: Unpack source archive
+        run: |
+          mkdir rebuild
+          tar -xf dist/*-source.tar -C rebuild --strip-components=1
+          ls rebuild
+
+      - name: Install locked toolchain
+        working-directory: rebuild/recipe
+        run: bash scripts/install-toolchain.sh
+
+      - name: Build offline from the archive
+        working-directory: rebuild/recipe
+        run: SOURCES_DIR="$PWD/../sources" bash scripts/build.sh
+
+      - name: Check runtime DLL imports
+        run: bash rebuild/recipe/scripts/check-runtime.sh rebuild/recipe/out
+
+      - name: Compare with the first build
+        run: |
+          mkdir first
+          unzip -q dist/*-win64.zip -d first
+          diff <(cd first && ls | grep -v README.txt) <(cd rebuild/recipe/out && ls)
+          diff <(first/ffmpeg.exe -hide_banner -buildconf) <(rebuild/recipe/out/ffmpeg.exe -hide_banner -buildconf)
+          echo "Same files and configuration. (Binaries are not expected to be byte-identical.)"

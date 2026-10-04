@@ -1,0 +1,6 @@
+sources/
+work/
+out/
+dist/
+toolchain-cache/
+toolchain-installed.txt
