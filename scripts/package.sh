@@ -14,7 +14,9 @@ CACHE="${TOOLCHAIN_CACHE:-$ROOT/toolchain-cache}"
 VERSION="$(lock_field ffmpeg 2)"
 REVISION="$(tr -d '[:space:]' < "$ROOT/REVISION")"
 NAME="videocull-ffmpeg-$VERSION-r$REVISION"
-COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || cat "$ROOT/COMMIT")"
+# CI checkouts belong to another Windows user, which git otherwise refuses to read.
+git config --global --add safe.directory "$ROOT"
+COMMIT="$(git -C "$ROOT" rev-parse HEAD)"
 mkdir -p "$DIST"
 STAGE="$(mktemp -d)"
 
