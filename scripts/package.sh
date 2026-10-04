@@ -77,11 +77,14 @@ def lock(path):
     return [dict(zip(('name', 'version', 'file', 'sha256', 'url'), r)) for r in rows]
 def sha(path):
     return hashlib.sha256(open(path, 'rb').read()).hexdigest()
+def files(top):
+    return sorted(os.path.relpath(os.path.join(d, f), top).replace(os.sep, '/')
+                  for d, _, names in os.walk(top) for f in names)
 print(json.dumps({
     'ffmpeg': version, 'revision': int(revision), 'commit': commit,
     'configure': [l.strip() for l in open(buildconf) if l.strip().startswith('--')],
-    'files': {f: {'sha256': sha(os.path.join(out, f)), 'size': os.path.getsize(os.path.join(out, f))}
-              for f in sorted(os.listdir(out))},
+    'files': {rel: {'sha256': sha(os.path.join(out, rel)), 'size': os.path.getsize(os.path.join(out, rel))}
+              for rel in files(out)},
     'sources': lock(os.path.join(root, 'sources.lock')),
     'toolchain': lock(os.path.join(root, 'msys2.lock')),
 }, indent=2))
