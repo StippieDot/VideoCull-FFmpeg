@@ -19,7 +19,7 @@ while read -r name version file sha url; do
     curl --fail --location --silent --show-error --retry 3 -o "$target.part" "$url"
     mv "$target.part" "$target"
   fi
-  actual="$(sha256sum "$target" | cut -d' ' -f1)"
+  actual="$(sha256_of "$target")"
   if [[ "$actual" != "$sha" ]]; then
     echo "hash mismatch for $file: expected $sha, got $actual" >&2; status=1
   else

@@ -1,5 +1,21 @@
 # Shared helpers. Sourced by the other scripts; expects ROOT to be set.
 
+# Prints the platform this machine builds for: win64, linux-x64, macos-arm64 or macos-x64.
+build_platform() {
+  case "$(uname -s)-$(uname -m)" in
+    MINGW*-x86_64|MSYS*-x86_64) echo win64 ;;
+    Linux-x86_64) echo linux-x64 ;;
+    Darwin-arm64) echo macos-arm64 ;;
+    Darwin-x86_64) echo macos-x64 ;;
+    *) echo "unsupported build machine: $(uname -s) $(uname -m)" >&2; return 1 ;;
+  esac
+}
+
+# macOS has shasum but no sha256sum.
+sha256_of() {
+  if command -v sha256sum > /dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1
+}
+
 # Prints "name version file sha256 url" for every entry of a lock file.
 lock_entries() {
   grep -vE '^\s*(#|$)' "$1"
