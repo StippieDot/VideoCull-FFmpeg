@@ -16,7 +16,7 @@ while read -r name version file sha url; do
     if (( OFFLINE )); then
       echo "missing $file (offline)" >&2; status=1; continue
     fi
-    curl --fail --location --silent --show-error --retry 3 -o "$target.part" "$url"
+    curl --fail --location --silent --show-error --retry 3 --retry-all-errors -o "$target.part" "$url"
     mv "$target.part" "$target"
   fi
   actual="$(sha256_of "$target")"
