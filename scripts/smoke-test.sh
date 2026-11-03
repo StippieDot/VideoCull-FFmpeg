@@ -1,17 +1,42 @@
 #!/usr/bin/env bash
 # Runs the commands VideoCull uses (and the ones its roadmap plans) against the runtime folder.
-# The binaries run with only Windows on PATH, so a missing bundled DLL fails here.
+# On Windows the binaries run with only Windows on PATH, and on Linux without LD_LIBRARY_PATH, so a
+# library that is not bundled fails here.
 # Usage: smoke-test.sh RUNTIME_DIR [FIXTURE_FFMPEG]
 #   FIXTURE_FFMPEG: an FFmpeg with HEVC/AV1/VP9 encoders, used only to create test clips.
 set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/scripts/lib.sh"
 BIN="$(cd "$1" && pwd)"
 FIXTURE_FFMPEG="${2:-}"
+PLATFORM="$(build_platform)"
 TMP="$(mktemp -d)"
-SYSTEM_PATH="$(cygpath -u "${SYSTEMROOT:-C:\Windows}")/System32:$(cygpath -u "${SYSTEMROOT:-C:\Windows}")"
 cd "$TMP"
+
+EXE=""
+case "$PLATFORM" in
+  win64)
+    EXE=.exe
+    SYSTEM_PATH="$(cygpath -u "${SYSTEMROOT:-C:\Windows}")/System32:$(cygpath -u "${SYSTEMROOT:-C:\Windows}")"
+    run() { env PATH="$SYSTEM_PATH" "$@"; }
+    HWACCELS="d3d11va d3d12va dxva2 cuda qsv"
+    ENCODERS="libx264 aac mjpeg h264_nvenc hevc_nvenc h264_qsv h264_amf hevc_amf h264_mf"
+    ;;
+  linux-x64)
+    run() { env -u LD_LIBRARY_PATH "$@"; }
+    HWACCELS="vaapi cuda"
+    ENCODERS="libx264 aac mjpeg h264_nvenc hevc_nvenc h264_vaapi hevc_vaapi"
+    ;;
+  macos-*)
+    run() { env -u DYLD_LIBRARY_PATH "$@"; }
+    HWACCELS="videotoolbox"
+    ENCODERS="libx264 aac mjpeg h264_videotoolbox hevc_videotoolbox"
+    ;;
+esac
+ff() { run "$BIN/ffmpeg$EXE" "$@"; }
+fp() { run "$BIN/ffprobe$EXE" "$@"; }
+
 pass=0; fail=0
-ff() { env PATH="$SYSTEM_PATH" "$BIN/ffmpeg.exe" "$@"; }
-fp() { env PATH="$SYSTEM_PATH" "$BIN/ffprobe.exe" "$@"; }
 check() {
   local name="$1"; shift
   if "$@" > "$name.log" 2>&1; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL $name"; tail -n 5 "$name.log"; fi
@@ -20,11 +45,15 @@ expect_in() {
   local name="$1" needle="$2"; shift 2
   if "$@" > "$name.log" 2>&1 && grep -qE -- "$needle" "$name.log"; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL $name"; tail -n 5 "$name.log"; fi
 }
+expect_not_in() {
+  local name="$1" needle="$2"; shift 2
+  if "$@" > "$name.log" 2>&1 && ! grep -qE -- "$needle" "$name.log"; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL $name"; tail -n 5 "$name.log"; fi
+}
 
 ff -hide_banner -version | head -n 3
-expect_in version 'ffmpeg version 9\.0\.2' ff -hide_banner -version
-for hw in d3d11va d3d12va dxva2 cuda qsv; do expect_in "hwaccel-$hw" "^$hw\$" ff -hide_banner -hwaccels; done
-for enc in libx264 aac mjpeg h264_nvenc hevc_nvenc h264_qsv h264_amf hevc_amf h264_mf; do expect_in "encoder-$enc" " $enc " ff -hide_banner -encoders; done
+expect_in version "ffmpeg version $(lock_field ffmpeg 2 | sed 's/\./\\./g')" ff -hide_banner -version
+for hw in $HWACCELS; do expect_in "hwaccel-$hw" "^$hw\$" ff -hide_banner -hwaccels; done
+for enc in $ENCODERS; do expect_in "encoder-$enc" " $enc " ff -hide_banner -encoders; done
 for dec in libdav1d h264 hevc vp9 vp8 mpeg4 msmpeg4 wmv3 vc1 prores mpeg2video aac mp3 ac3 opus; do expect_in "decoder-$dec" " $dec " ff -hide_banner -decoders; done
 for filter in cropdetect scale trim concat setpts aresample; do expect_in "filter-$filter" " $filter " ff -hide_banner -filters; done
 expect_in demuxer-concat ' concat ' ff -hide_banner -demuxers
@@ -48,14 +77,14 @@ for clip in "${clips[@]}"; do
   check "gray-$clip" ff -v error -ss 0.5 -i "$clip" -ss 1.5 -i "$clip" -ss 2.5 -i "$clip" -filter_complex \
     "[0:v]scale=32:32:flags=bicubic,setsar=1,format=gray,trim=end_frame=1,setpts=PTS-STARTPTS[v0];[1:v]scale=32:32:flags=bicubic,setsar=1,format=gray,trim=end_frame=1,setpts=PTS-STARTPTS[v1];[2:v]scale=32:32:flags=bicubic,setsar=1,format=gray,trim=end_frame=1,setpts=PTS-STARTPTS[v2];[v0][v1][v2]concat=n=3:v=1:a=0[out]" \
     -map "[out]" -frames:v 3 -f rawvideo -pix_fmt gray -threads 1 "$clip.gray"
-  check "gray-size-$clip" test "$(stat -c %s "$clip.gray")" -eq 3072
+  check "gray-size-$clip" test "$(wc -c < "$clip.gray" | tr -d ' ')" -eq 3072
 done
 expect_in cropdetect 'crop=' ff -i h264.mp4 -vf cropdetect -f null -
 printf "file 'h264.mp4'\ninpoint 0.5\noutpoint 1.5\nfile 'h264.mp4'\ninpoint 2\noutpoint 3\n" > list.txt
 check concat-copy ff -v error -y -f concat -safe 0 -i list.txt -c copy joined.mp4
 check exact-export ff -v error -y -ss 0.5 -i h264.mp4 -t 2 -c:v libx264 -crf 18 -preset veryfast -c:a aac -b:a 192k -movflags +faststart exact.mp4
 check audio-pcm ff -v error -y -i h264.mp4 -vn -ac 1 -ar 8000 -f s16le audio.pcm
-check network-disabled bash -c "! env PATH='$SYSTEM_PATH' '$BIN/ffmpeg.exe' -hide_banner -protocols | grep -qE '^\s+(http|https|tcp)$'"
+expect_not_in network-disabled '^[[:space:]]+(http|https|tcp)$' ff -hide_banner -protocols
 
-echo "smoke test: $pass passed, $fail failed"
+echo "smoke test ($PLATFORM): $pass passed, $fail failed"
 (( fail == 0 ))

@@ -48,7 +48,7 @@ jobs:
       - name: Report sizes
         run: |
           {
-            echo '### Runtime'
+            echo '### Runtime (win64)'
             echo '```'
             ls -l out
             du -sh out
@@ -61,10 +61,99 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: toolchain
+          name: win64
           path: |
             dist/
             msys2.lock
+          if-no-files-found: error
+          retention-days: 30
+
+  # Builds in Debian 11, so the binaries need nothing newer than its glibc 2.31, then tests them on
+  # the much newer runner system.
+  build-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Fetch and verify sources
+        run: bash scripts/fetch-sources.sh
+
+      - name: Build in Debian 11
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src \
+            debian:bullseye-slim@sha256:e5b6442dd2e9684cf5e87d8338b5968f3b348636fc0be6d7850a381e3731a2bd \
+            bash -c 'bash scripts/install-toolchain-linux.sh && time bash scripts/build.sh && bash scripts/check-runtime.sh out'
+          sudo chown -R "$(id -u):$(id -g)" .
+
+      - name: Install fixture encoders (test clips only, not shipped)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Smoke test
+        run: bash scripts/smoke-test.sh out /usr/bin/ffmpeg
+
+      - name: Package
+        run: bash scripts/package.sh
+
+      - name: Report sizes
+        run: |
+          { echo '### Runtime (linux-x64)'; echo '```'; ls -l out; du -sh out; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-x64
+          path: |
+            dist/
+            toolchain-installed.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  build-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: macos-arm64
+          - runner: macos-15-intel
+            platform: macos-x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install build tools
+        run: bash scripts/install-toolchain-macos.sh
+
+      - name: Fetch and verify sources
+        run: bash scripts/fetch-sources.sh
+
+      - name: Build
+        run: time bash scripts/build.sh
+
+      - name: Check runtime libraries
+        run: bash scripts/check-runtime.sh out
+
+      # Installed after the build so none of its libraries can end up in ours.
+      - name: Install fixture encoders (test clips only, not shipped)
+        run: brew install ffmpeg
+
+      - name: Smoke test
+        run: bash scripts/smoke-test.sh out "$(brew --prefix)/bin/ffmpeg"
+
+      - name: Package
+        run: bash scripts/package.sh
+
+      - name: Report sizes
+        run: |
+          { echo '### Runtime (${{ matrix.platform }})'; echo '```'; ls -l out; du -sh out; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.platform }}
+          path: |
+            dist/
+            toolchain-installed.txt
           if-no-files-found: error
           retention-days: 30
 
@@ -86,7 +175,7 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          name: toolchain
+          name: win64
 
       - name: Unpack source archive
         run: |
@@ -115,10 +204,10 @@ jobs:
           diff <(buildconf first/ffmpeg.exe) <(buildconf rebuild/recipe/out/ffmpeg.exe)
           echo "Same files and configuration. (Binaries are not expected to be byte-identical.)"
 
-  # Publishes only when started by hand on main, after both builds passed. The release is created as a
+  # Publishes only when started by hand on main, after every build passed. The release is created as a
   # draft, filled, then published, because immutable releases cannot be changed afterwards.
   publish:
-    needs: [build, rebuild-from-source]
+    needs: [build, build-linux, build-macos, rebuild-from-source]
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -126,27 +215,38 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: toolchain
+          path: artifacts
 
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          manifest="$(ls dist/*-manifest.json)"
-          name="$(basename "$manifest" -manifest.json)"   # videocull-ffmpeg-<version>-r<revision>
+          mkdir dist
+          cp artifacts/*/dist/* dist/
+          source_tar="$(ls dist/*-source.tar)"
+          name="$(basename "$source_tar" -source.tar)"   # videocull-ffmpeg-<version>-r<revision>
           tag="ffmpeg-${name#videocull-ffmpeg-}"
+          manifest="dist/$name-win64-manifest.json"
+          for platform in win64 linux-x64 macos-arm64 macos-x64; do
+            ls "dist/$name-$platform".* "dist/$name-$platform-manifest.json" > /dev/null
+          done
           if gh release view "$tag" > /dev/null 2>&1; then
             echo "Release $tag already exists; raise REVISION for a new build." >&2
             exit 1
           fi
-          (cd dist && sha256sum --check SHA256SUMS)
+          (cd dist && sha256sum * > SHA256SUMS)
           cat > notes.md <<NOTES
           FFmpeg $(jq -r .ffmpeg "$manifest") built for VideoCull, revision $(jq -r .revision "$manifest"), from commit $GITHUB_SHA.
 
-          - \`$name-win64.zip\`: the runtime folder VideoCull bundles
-          - \`$name-source.tar\`: the complete corresponding source (GitHub's automatic "Source code" archives contain only the build recipe)
-          - \`$name-manifest.json\`: versions, configure options and hashes of every input and output
+          Runtime folders VideoCull bundles, one per platform, all built from the same sources:
+          - \`$name-win64.zip\`: Windows 10 22H2 or newer, x64
+          - \`$name-linux-x64.tar.xz\`: Linux x64 with glibc 2.31 or newer
+          - \`$name-macos-arm64.tar.xz\`: macOS 12 or newer, Apple silicon
+          - \`$name-macos-x64.tar.xz\`: macOS 12 or newer, Intel
+
+          - \`$name-source.tar\`: the complete corresponding source for all four (GitHub's automatic "Source code" archives contain only the build recipe)
+          - \`$name-<platform>-manifest.json\`: versions, configure options, toolchain and hashes of every input and output
           - \`SHA256SUMS\`
           NOTES
           gh release create "$tag" --draft --target "$GITHUB_SHA" --title "FFmpeg $(jq -r .ffmpeg "$manifest") for VideoCull (r$(jq -r .revision "$manifest"))" --notes-file notes.md

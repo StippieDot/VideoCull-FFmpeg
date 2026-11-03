@@ -16,10 +16,10 @@ while read -r name version file sha url; do
     if (( OFFLINE )); then
       echo "missing $file (offline)" >&2; status=1; continue
     fi
-    curl --fail --location --silent --show-error --retry 3 -o "$target.part" "$url"
+    curl --fail --location --silent --show-error --retry 3 --retry-all-errors -o "$target.part" "$url"
     mv "$target.part" "$target"
   fi
-  actual="$(sha256sum "$target" | cut -d' ' -f1)"
+  actual="$(sha256_of "$target")"
   if [[ "$actual" != "$sha" ]]; then
     echo "hash mismatch for $file: expected $sha, got $actual" >&2; status=1
   else
