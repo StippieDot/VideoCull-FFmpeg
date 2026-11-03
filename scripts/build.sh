@@ -149,10 +149,6 @@ case "$PLATFORM" in
     --enable-vaapi
     --enable-ffnvcodec --enable-cuvid --enable-nvdec --enable-nvenc
     --extra-ldflags="-L$PREFIX/lib"
-    # Binaries and libraries find each other in their own folder. Make turns $$ into $, and the
-    # quotes keep the shell from expanding $ORIGIN.
-    --extra-ldexeflags="-Wl,-rpath,'\$\$ORIGIN'"
-    --extra-ldsoflags="-Wl,-rpath,'\$\$ORIGIN'"
   ) ;;
   macos-*) platform=(
     --enable-pthreads
@@ -163,7 +159,12 @@ case "$PLATFORM" in
     --extra-ldexeflags=-Wl,-rpath,@loader_path
   ) ;;
 esac
-(cd "$d" && ./configure "${common[@]}" "${platform[@]}" && make -j"$JOBS" && make install)
+# On Linux the binaries and libraries find each other in their own folder through $ORIGIN. The linker
+# reads LD_RUN_PATH itself, so no shell expands the $ (configure and make each would in a flag).
+run_path=""
+[[ "$PLATFORM" == linux-x64 ]] && run_path='$ORIGIN'
+(cd "$d" && ./configure "${common[@]}" "${platform[@]}" \
+  && LD_RUN_PATH="$run_path" make -j"$JOBS" && make install)
 done_step ffmpeg
 
 case "$PLATFORM" in
